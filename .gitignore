@@ -4,4 +4,3 @@ node_modules/
 .env
 dist/*.d.ts
 dist/*.d.ts.map
-dist/sourcemap-register.js
