@@ -1,0 +1,40 @@
+name: Odin Scan Full Security Analysis
+on:
+  pull_request:
+    branches: [main, master, develop]
+  push:
+    branches: [main]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Odin Scan
+        id: scan
+        uses: odin-scan/odin-scan-action@v1
+        with:
+          api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+          platform: auto
+          severity-threshold: medium
+          fail-on-findings: true
+          comment-on-pr: true
+          upload-sarif: true
+          upload-artifact: true
+          timeout: 1800
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print results
+        if: always()
+        run: |
+          echo "Analysis ID: ${{ steps.scan.outputs.analysis-id }}"
+          echo "Status: ${{ steps.scan.outputs.status }}"
+          echo "Total Findings: ${{ steps.scan.outputs.total-findings }}"
+          echo "Critical: ${{ steps.scan.outputs.critical-count }}"
+          echo "High: ${{ steps.scan.outputs.high-count }}"
+          echo "Report: ${{ steps.scan.outputs.report-url }}"

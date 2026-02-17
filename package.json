@@ -1,0 +1,22 @@
+{
+  "name": "odin-scan-action",
+  "version": "1.0.0",
+  "description": "GitHub Action for Odin Scan smart contract security analysis",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/github": "^6.0.0",
+    "@actions/artifact": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vercel/ncc": "^0.38.1",
+    "typescript": "^5.3.3"
+  },
+  "license": "MIT",
+  "private": true
+}

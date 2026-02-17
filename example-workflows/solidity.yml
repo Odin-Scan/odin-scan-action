@@ -1,0 +1,22 @@
+name: Odin Scan EVM Analysis
+on:
+  pull_request:
+    paths:
+      - '**.sol'
+      - 'foundry.toml'
+      - 'hardhat.config.*'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: odin-scan/odin-scan-action@v1
+        with:
+          api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+          platform: evm
+          severity-threshold: high
