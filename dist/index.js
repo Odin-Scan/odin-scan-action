@@ -82013,6 +82013,7 @@ const core = __importStar(__nccwpck_require__(37484));
 const github = __importStar(__nccwpck_require__(93228));
 const fs = __importStar(__nccwpck_require__(79896));
 const path = __importStar(__nccwpck_require__(16928));
+const zlib = __importStar(__nccwpck_require__(43106));
 const artifact_1 = __nccwpck_require__(76846);
 const api_client_1 = __nccwpck_require__(87475);
 const sarif_1 = __nccwpck_require__(20866);
@@ -82136,7 +82137,7 @@ async function run() {
                 core.info('Uploading SARIF to GitHub Code Scanning...');
                 const octokit = github.getOctokit(config.githubToken);
                 const sarifContent = fs.readFileSync(sarifPath, 'utf8');
-                const gzipped = Buffer.from(sarifContent).toString('base64');
+                const gzipped = zlib.gzipSync(Buffer.from(sarifContent)).toString('base64');
                 await octokit.rest.codeScanning.uploadSarif({
                     owner: context.repo.owner,
                     repo: context.repo.repo,

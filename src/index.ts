@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as zlib from 'zlib';
 import { DefaultArtifactClient } from '@actions/artifact';
 import { OdinScanClient } from './api-client';
 import { generateSarif } from './sarif';
@@ -153,7 +154,7 @@ async function run(): Promise<void> {
         core.info('Uploading SARIF to GitHub Code Scanning...');
         const octokit = github.getOctokit(config.githubToken);
         const sarifContent = fs.readFileSync(sarifPath, 'utf8');
-        const gzipped = Buffer.from(sarifContent).toString('base64');
+        const gzipped = zlib.gzipSync(Buffer.from(sarifContent)).toString('base64');
 
         await octokit.rest.codeScanning.uploadSarif({
           owner: context.repo.owner,
