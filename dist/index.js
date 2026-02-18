@@ -82035,11 +82035,27 @@ function parseInputs() {
         severityThreshold: (core.getInput('severity-threshold') || 'high'),
         failOnFindings: core.getBooleanInput('fail-on-findings'),
         commentOnPr: core.getBooleanInput('comment-on-pr'),
+        findingsVisibility: parseFindingsVisibility(core.getInput('findings-visibility')),
         uploadSarif: core.getBooleanInput('upload-sarif'),
         uploadArtifact: core.getBooleanInput('upload-artifact'),
         timeout: parseInt(core.getInput('timeout') || '1800', 10),
         githubToken: core.getInput('github-token') || process.env.GITHUB_TOKEN || '',
     };
+}
+/** Valid values for the findings-visibility input. */
+const VALID_VISIBILITY_MODES = ['full', 'counts', 'private'];
+/**
+ * Parses and validates the findings-visibility input.
+ *
+ * Falls back to 'full' with a warning if an unrecognized value is provided.
+ */
+function parseFindingsVisibility(raw) {
+    const value = (raw || 'full').trim().toLowerCase();
+    if (VALID_VISIBILITY_MODES.includes(value)) {
+        return value;
+    }
+    core.warning(`Unknown findings-visibility '${value}', defaulting to 'full'`);
+    return 'full';
 }
 /**
  * Resolves the contract framework string from the platform input.
@@ -82176,12 +82192,14 @@ async function run() {
                 core.warning(`Failed to upload SARIF: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
-        // 10. Emit annotations
-        (0, annotations_1.emitAnnotations)(result.findings);
+        // 10. Emit annotations (only in 'full' mode to avoid leaking details on public repos)
+        if (config.findingsVisibility === 'full') {
+            (0, annotations_1.emitAnnotations)(result.findings);
+        }
         // 11. PR comment
         if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
             try {
-                await (0, pr_comment_1.postPrComment)(result, reportUrl, effectiveGithubToken);
+                await (0, pr_comment_1.postPrComment)(result, reportUrl, effectiveGithubToken, config.findingsVisibility);
                 core.info('PR comment posted');
             }
             catch (err) {
@@ -82280,14 +82298,38 @@ function truncate(text, maxLen) {
     const cut = text.lastIndexOf(' ', maxLen);
     return `${text.slice(0, cut > 0 ? cut : maxLen)}…`;
 }
+/** Appends branch and commit metadata to the comment body. */
+function appendBranchInfo(body, result) {
+    if (!result.branch)
+        return body;
+    let line = `**Branch:** \`${result.branch}\``;
+    if (result.commitHash)
+        line += ` (\`${result.commitHash.substring(0, 7)}\`)`;
+    return body + line + `\n`;
+}
+/** Builds the severity counts table. */
+function buildSeverityTable(summary) {
+    let table = `| Severity | Count |\n`;
+    table += `|----------|-------|\n`;
+    if (summary.criticalFindings > 0)
+        table += `| 🔴 Critical | ${summary.criticalFindings} |\n`;
+    if (summary.highFindings > 0)
+        table += `| 🟠 High | ${summary.highFindings} |\n`;
+    if (summary.mediumFindings > 0)
+        table += `| 🟡 Medium | ${summary.mediumFindings} |\n`;
+    if (summary.lowFindings > 0)
+        table += `| 🟢 Low | ${summary.lowFindings} |\n`;
+    if (summary.informationalFindings > 0)
+        table += `| 🔵 Info | ${summary.informationalFindings} |\n`;
+    return table + `\n`;
+}
 /**
- * Formats the PR comment body from analysis results.
+ * Formats a full-detail PR comment with severity table and top findings.
  *
- * Produces a markdown table of finding counts by severity,
- * lists Critical and High findings with description and location,
- * and links to the full report.
+ * Includes finding titles, file locations, descriptions, and remediation hints.
+ * Suitable for private repositories or contexts where disclosure is acceptable.
  */
-function formatComment(result, reportUrl) {
+function formatFull(result, reportUrl) {
     const { summary } = result;
     const totalReal = summary.totalFindings - (summary.falsePositiveCount || 0);
     let body = `## 🛡️ Odin Scan Security Analysis\n\n`;
@@ -82295,19 +82337,7 @@ function formatComment(result, reportUrl) {
         body += `✅ **No security findings detected.**\n\n`;
     }
     else {
-        body += `| Severity | Count |\n`;
-        body += `|----------|-------|\n`;
-        if (summary.criticalFindings > 0)
-            body += `| 🔴 Critical | ${summary.criticalFindings} |\n`;
-        if (summary.highFindings > 0)
-            body += `| 🟠 High | ${summary.highFindings} |\n`;
-        if (summary.mediumFindings > 0)
-            body += `| 🟡 Medium | ${summary.mediumFindings} |\n`;
-        if (summary.lowFindings > 0)
-            body += `| 🟢 Low | ${summary.lowFindings} |\n`;
-        if (summary.informationalFindings > 0)
-            body += `| 🔵 Info | ${summary.informationalFindings} |\n`;
-        body += `\n`;
+        body += buildSeverityTable(summary);
         // Prefer Critical/High findings; fall back to Medium if none exist
         const severityOrder = { critical: 3, high: 2, medium: 1 };
         let topFindings = result.findings
@@ -82343,23 +82373,78 @@ function formatComment(result, reportUrl) {
             }
         }
     }
-    if (result.branch) {
-        body += `**Branch:** \`${result.branch}\``;
-        if (result.commitHash)
-            body += ` (\`${result.commitHash.substring(0, 7)}\`)`;
-        body += `\n`;
-    }
+    body = appendBranchInfo(body, result);
     body += `\nTo see the full report, go to [View full report](${reportUrl}) | Powered by [Odin Scan](https://odinscan.ai)\n`;
     return body;
+}
+/**
+ * Formats a counts-only PR comment with the severity table but no finding details.
+ *
+ * Omits titles, file paths, descriptions, and remediation to avoid leaking
+ * exploitable vulnerability details on public repositories.
+ */
+function formatCounts(result, reportUrl) {
+    const { summary } = result;
+    const totalReal = summary.totalFindings - (summary.falsePositiveCount || 0);
+    let body = `## 🛡️ Odin Scan Security Analysis\n\n`;
+    if (totalReal === 0) {
+        body += `✅ **No security findings detected.**\n\n`;
+    }
+    else {
+        body += buildSeverityTable(summary);
+    }
+    body = appendBranchInfo(body, result);
+    body += `\n[View full report](${reportUrl}) | Powered by [Odin Scan](https://odinscan.ai)\n`;
+    return body;
+}
+/**
+ * Formats a private PR comment that reveals no finding details or counts.
+ *
+ * Only indicates whether findings exist and links to the login-protected
+ * report dashboard. Designed for public repositories with production code
+ * where any disclosure creates an exploitable attack window.
+ */
+function formatPrivate(result, reportUrl) {
+    const { summary } = result;
+    const totalReal = summary.totalFindings - (summary.falsePositiveCount || 0);
+    let body = `## 🛡️ Odin Scan Security Analysis\n\n`;
+    if (totalReal === 0) {
+        body += `✅ **Security analysis complete.**\n\n`;
+    }
+    else {
+        body += `⚠️ **Security findings were detected that require attention before merging.**\n\n`;
+    }
+    body = appendBranchInfo(body, result);
+    body += `\nDetails are restricted to authorized reviewers. [View private report](${reportUrl}) | Powered by [Odin Scan](https://odinscan.ai)\n`;
+    return body;
+}
+/**
+ * Formats the PR comment body from analysis results.
+ *
+ * Delegates to mode-specific formatters based on the findings visibility level:
+ * - `full`: severity table + top findings with details (titles, locations, descriptions)
+ * - `counts`: severity table only, no finding details
+ * - `private`: no counts or details, just a link to the private report
+ */
+function formatComment(result, reportUrl, mode) {
+    switch (mode) {
+        case 'counts':
+            return formatCounts(result, reportUrl);
+        case 'private':
+            return formatPrivate(result, reportUrl);
+        default:
+            return formatFull(result, reportUrl);
+    }
 }
 /**
  * Creates a new PR comment with analysis results.
  *
  * Posts a fresh comment on each run so every commit gets its own
  * security summary visible in the PR timeline. No-ops if the
- * current context is not a pull request.
+ * current context is not a pull request. The visibility mode controls
+ * how much finding detail is included in the comment.
  */
-async function postPrComment(result, reportUrl, githubToken) {
+async function postPrComment(result, reportUrl, githubToken, mode = 'full') {
     const context = github.context;
     if (!context.payload.pull_request) {
         core.info('Not a pull request -- skipping PR comment');
@@ -82369,8 +82454,8 @@ async function postPrComment(result, reportUrl, githubToken) {
     const issueNumber = context.payload.pull_request.number;
     const owner = context.repo.owner;
     const repo = context.repo.repo;
-    const body = formatComment(result, reportUrl);
-    core.info('Creating new PR comment');
+    const body = formatComment(result, reportUrl, mode);
+    core.info(`Creating new PR comment (visibility: ${mode})`);
     await octokit.rest.issues.createComment({
         owner,
         repo,

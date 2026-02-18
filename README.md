@@ -50,6 +50,7 @@ jobs:
 | `severity-threshold` | No | `high` | Fail at this severity or above: `critical`, `high`, `medium`, `low`, `none` |
 | `fail-on-findings` | No | `true` | Whether to fail the workflow when findings exceed threshold |
 | `comment-on-pr` | No | `true` | Post summary comment on pull requests |
+| `findings-visibility` | No | `full` | Detail level for public PR output: `full`, `counts`, `private` |
 | `upload-sarif` | No | `true` | Upload SARIF to GitHub Code Scanning |
 | `upload-artifact` | No | `true` | Upload full report as workflow artifact |
 | `timeout` | No | `1800` | Max wait for analysis completion (seconds) |
@@ -121,6 +122,7 @@ jobs:
     severity-threshold: medium
     fail-on-findings: true
     comment-on-pr: true
+    findings-visibility: full
     upload-sarif: true
     upload-artifact: true
     timeout: 1800
@@ -171,6 +173,27 @@ permissions:
   security-events: write  # Required for SARIF upload
   pull-requests: write    # Required for PR comments
 ```
+
+## Public Repository Security
+
+On public repositories, PR comments and inline annotations are visible to anyone. This can create an attack window where a threat actor reads vulnerability details before your team fixes them.
+
+Use the `findings-visibility` input to control disclosure:
+
+| Mode | PR Comment | Annotations | Best for |
+|------|-----------|-------------|----------|
+| `full` | Severity table + finding details | Emitted | Private repos |
+| `counts` | Severity table only | Suppressed | Public repos (aggregate signal) |
+| `private` | "Findings detected" + link | Suppressed | Public repos with production code |
+
+```yaml
+- uses: odin-scan/odin-scan-action@v1
+  with:
+    api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+    findings-visibility: private
+```
+
+SARIF uploads and workflow artifacts are unaffected by this setting -- GitHub restricts SARIF results to users with security permissions, and artifacts require repository access.
 
 ## Troubleshooting
 

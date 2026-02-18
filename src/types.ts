@@ -7,6 +7,9 @@ export type ThresholdLevel = 'critical' | 'high' | 'medium' | 'low' | 'none';
 /** Supported target platforms. */
 export type Platform = 'auto' | 'cosmwasm' | 'solana' | 'evm';
 
+/** Controls how much finding detail is exposed in public PR output (comments and annotations). */
+export type FindingsVisibility = 'full' | 'counts' | 'private';
+
 /** Response from the verify-key endpoint. */
 export interface VerifyKeyResponse {
   /** Whether the API key is valid. */
@@ -148,6 +151,8 @@ export interface ActionConfig {
   failOnFindings: boolean;
   /** Whether to post a summary comment on pull requests. */
   commentOnPr: boolean;
+  /** Detail level for public PR output (comments and annotations). */
+  findingsVisibility: FindingsVisibility;
   /** Whether to upload SARIF to GitHub Code Scanning. */
   uploadSarif: boolean;
   /** Whether to upload the full report as a workflow artifact. */

@@ -9,7 +9,7 @@ import { generateSarif } from './sarif';
 import { emitAnnotations } from './annotations';
 import { postPrComment } from './pr-comment';
 import { exceedsThreshold, countFindingsAboveThreshold } from './severity';
-import type { ActionConfig, Platform, ThresholdLevel } from './types';
+import type { ActionConfig, FindingsVisibility, Platform, ThresholdLevel } from './types';
 
 /** Parses and validates action inputs from the workflow configuration. */
 function parseInputs(): ActionConfig {
@@ -23,11 +23,29 @@ function parseInputs(): ActionConfig {
     severityThreshold: (core.getInput('severity-threshold') || 'high') as ThresholdLevel,
     failOnFindings: core.getBooleanInput('fail-on-findings'),
     commentOnPr: core.getBooleanInput('comment-on-pr'),
+    findingsVisibility: parseFindingsVisibility(core.getInput('findings-visibility')),
     uploadSarif: core.getBooleanInput('upload-sarif'),
     uploadArtifact: core.getBooleanInput('upload-artifact'),
     timeout: parseInt(core.getInput('timeout') || '1800', 10),
     githubToken: core.getInput('github-token') || process.env.GITHUB_TOKEN || '',
   };
+}
+
+/** Valid values for the findings-visibility input. */
+const VALID_VISIBILITY_MODES: FindingsVisibility[] = ['full', 'counts', 'private'];
+
+/**
+ * Parses and validates the findings-visibility input.
+ *
+ * Falls back to 'full' with a warning if an unrecognized value is provided.
+ */
+function parseFindingsVisibility(raw: string): FindingsVisibility {
+  const value = (raw || 'full').trim().toLowerCase();
+  if (VALID_VISIBILITY_MODES.includes(value as FindingsVisibility)) {
+    return value as FindingsVisibility;
+  }
+  core.warning(`Unknown findings-visibility '${value}', defaulting to 'full'`);
+  return 'full';
 }
 
 /**
@@ -189,13 +207,15 @@ async function run(): Promise<void> {
       }
     }
 
-    // 10. Emit annotations
-    emitAnnotations(result.findings);
+    // 10. Emit annotations (only in 'full' mode to avoid leaking details on public repos)
+    if (config.findingsVisibility === 'full') {
+      emitAnnotations(result.findings);
+    }
 
     // 11. PR comment
     if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
       try {
-        await postPrComment(result, reportUrl, effectiveGithubToken);
+        await postPrComment(result, reportUrl, effectiveGithubToken, config.findingsVisibility);
         core.info('PR comment posted');
       } catch (err) {
         core.warning(

@@ -26,6 +26,10 @@ inputs:
     description: 'Post summary comment on pull requests'
     required: false
     default: 'true'
+  findings-visibility:
+    description: 'Detail level for public PR output: full (all details), counts (severity table only), private (no details, link only)'
+    required: false
+    default: 'full'
   upload-sarif:
     description: 'Upload SARIF to GitHub Code Scanning'
     required: false

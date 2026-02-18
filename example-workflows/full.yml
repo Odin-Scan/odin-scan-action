@@ -24,6 +24,7 @@ jobs:
           severity-threshold: medium
           fail-on-findings: true
           comment-on-pr: true
+          findings-visibility: full
           upload-sarif: true
           upload-artifact: true
           timeout: 1800
