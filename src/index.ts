@@ -139,7 +139,10 @@ async function run(): Promise<void> {
     core.setOutput('medium-count', summary.mediumFindings.toString());
     core.setOutput('low-count', summary.lowFindings.toString());
 
-    const reportUrl = `${config.apiUrl.replace('api.', 'app.')}/reports/${analysisId}`;
+    // Strip the "api." subdomain and add the dashboard path prefix.
+    // e.g. https://api.staging.odinscan.ai → https://staging.odinscan.ai/dashboard/reports/<id>
+    //      https://api.odinscan.ai          → https://odinscan.ai/dashboard/reports/<id>
+    const reportUrl = `${config.apiUrl.replace('://api.', '://')}/dashboard/reports/${analysisId}`;
     core.setOutput('report-url', reportUrl);
 
     // 7. Generate SARIF

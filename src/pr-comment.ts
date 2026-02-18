@@ -1,33 +1,57 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import type { AnalysisResult } from './types';
+import type { AnalysisResult, Severity } from './types';
 
 /** HTML comment marker used to identify and upsert Odin Scan PR comments. */
 const COMMENT_MARKER = '<!-- odin-scan-report -->';
+
+/** Emoji for each severity level, matching the markdown report convention. */
+const SEVERITY_EMOJI: Record<Severity, string> = {
+  critical: '🔴',
+  high: '🟠',
+  medium: '🟡',
+  low: '🟢',
+  informational: '🔵',
+};
+
+/** Maximum characters to show from a finding description before truncating. */
+const DESC_MAX_LEN = 200;
+
+/**
+ * Truncates a string to `maxLen` characters, appending "…" if cut.
+ *
+ * Avoids splitting mid-word by breaking at the last space within the limit.
+ */
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const cut = text.lastIndexOf(' ', maxLen);
+  return `${text.slice(0, cut > 0 ? cut : maxLen)}…`;
+}
 
 /**
  * Formats the PR comment body from analysis results.
  *
  * Produces a markdown table of finding counts by severity,
- * lists the top 5 most severe findings, and links to the full report.
+ * lists the top 5 most severe findings with description and location,
+ * and links to the full report.
  */
 function formatComment(result: AnalysisResult, reportUrl: string): string {
   const { summary } = result;
   const totalReal = summary.totalFindings - (summary.falsePositiveCount || 0);
 
   let body = `${COMMENT_MARKER}\n`;
-  body += `## Shield Odin Scan Security Analysis\n\n`;
+  body += `## 🛡️ Odin Scan Security Analysis\n\n`;
 
   if (totalReal === 0) {
-    body += `**No security findings detected.**\n\n`;
+    body += `✅ **No security findings detected.**\n\n`;
   } else {
     body += `| Severity | Count |\n`;
     body += `|----------|-------|\n`;
-    if (summary.criticalFindings > 0) body += `| Critical | ${summary.criticalFindings} |\n`;
-    if (summary.highFindings > 0) body += `| High | ${summary.highFindings} |\n`;
-    if (summary.mediumFindings > 0) body += `| Medium | ${summary.mediumFindings} |\n`;
-    if (summary.lowFindings > 0) body += `| Low | ${summary.lowFindings} |\n`;
-    if (summary.informationalFindings > 0) body += `| Info | ${summary.informationalFindings} |\n`;
+    if (summary.criticalFindings > 0) body += `| 🔴 Critical | ${summary.criticalFindings} |\n`;
+    if (summary.highFindings > 0) body += `| 🟠 High | ${summary.highFindings} |\n`;
+    if (summary.mediumFindings > 0) body += `| 🟡 Medium | ${summary.mediumFindings} |\n`;
+    if (summary.lowFindings > 0) body += `| 🟢 Low | ${summary.lowFindings} |\n`;
+    if (summary.informationalFindings > 0) body += `| 🔵 Info | ${summary.informationalFindings} |\n`;
     body += `\n`;
 
     // Show top 5 findings sorted by severity (highest first)
@@ -47,12 +71,23 @@ function formatComment(result: AnalysisResult, reportUrl: string): string {
     if (topFindings.length > 0) {
       body += `### Top Findings\n\n`;
       for (const f of topFindings) {
-        const loc = f.location
-          ? ` (\`${f.location.file}${f.location.startLine ? `:${f.location.startLine}` : ''}\`)`
-          : '';
-        body += `- **[${f.severity.toUpperCase()}]** ${f.title}${loc}\n`;
+        const emoji = SEVERITY_EMOJI[f.severity] ?? '⚪';
+        const loc = f.location?.file
+          ? (() => {
+              const lines = f.location.startLine
+                ? f.location.endLine && f.location.endLine !== f.location.startLine
+                  ? `L${f.location.startLine}-L${f.location.endLine}`
+                  : `L${f.location.startLine}`
+                : '';
+              return `\`${f.location.file}${lines ? `:${lines}` : ''}\``;
+            })()
+          : null;
+
+        body += `#### ${emoji} **[${f.severity.toUpperCase()}]** ${f.title}\n`;
+        if (loc) body += `> 📍 ${loc}\n`;
+        if (f.description) body += `>\n> ${truncate(f.description, DESC_MAX_LEN)}\n`;
+        body += `\n`;
       }
-      body += `\n`;
     }
   }
 
