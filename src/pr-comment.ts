@@ -50,10 +50,17 @@ function formatComment(result: AnalysisResult, reportUrl: string): string {
     if (summary.informationalFindings > 0) body += `| 🔵 Info | ${summary.informationalFindings} |\n`;
     body += `\n`;
 
-    // Show only Critical and High findings (most actionable for PR review)
-    const topFindings = result.findings
-      .filter(f => !f.isLikelyFalsePositive && (f.severity === 'critical' || f.severity === 'high'))
-      .sort((a, b) => (a.severity === 'critical' ? -1 : 1));
+    // Prefer Critical/High findings; fall back to Medium if none exist
+    const severityOrder: Record<string, number> = { critical: 3, high: 2, medium: 1 };
+    let topFindings = result.findings
+      .filter(f => f.severity === 'critical' || f.severity === 'high')
+      .sort((a, b) => (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0));
+
+    if (topFindings.length === 0) {
+      topFindings = result.findings
+        .filter(f => f.severity === 'medium')
+        .sort((a, b) => (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0));
+    }
 
     if (topFindings.length > 0) {
       body += `### Top Findings\n\n`;
@@ -70,9 +77,10 @@ function formatComment(result: AnalysisResult, reportUrl: string): string {
             })()
           : null;
 
-        body += `#### ${emoji} **[${f.severity.toUpperCase()}]** ${f.title}\n`;
+        body += `${emoji} **[${f.severity.toUpperCase()}]** ${f.title}\n`;
         if (loc) body += `> 📍 ${loc}\n`;
-        if (f.description) body += `>\n> ${truncate(f.description, DESC_MAX_LEN)}\n`;
+        if (f.description) body += `> ${truncate(f.description, DESC_MAX_LEN)}\n`;
+        if (f.remediation) body += `> 💡 ${truncate(f.remediation, DESC_MAX_LEN)}\n`;
         body += `\n`;
       }
     }
@@ -84,7 +92,7 @@ function formatComment(result: AnalysisResult, reportUrl: string): string {
     body += `\n`;
   }
 
-  body += `\n[View full report](${reportUrl}) | Powered by [Odin Scan](https://odinscan.ai)\n`;
+  body += `\nTo see the full report, go to [View full report](${reportUrl}) | Powered by [Odin Scan](https://odinscan.ai)\n`;
 
   return body;
 }
