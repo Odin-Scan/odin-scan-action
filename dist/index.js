@@ -82181,7 +82181,7 @@ async function run() {
         // 11. PR comment
         if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
             try {
-                await (0, pr_comment_1.upsertPrComment)(result, reportUrl, effectiveGithubToken);
+                await (0, pr_comment_1.postPrComment)(result, reportUrl, effectiveGithubToken);
                 core.info('PR comment posted');
             }
             catch (err) {
@@ -82256,11 +82256,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.upsertPrComment = upsertPrComment;
+exports.postPrComment = postPrComment;
 const core = __importStar(__nccwpck_require__(37484));
 const github = __importStar(__nccwpck_require__(93228));
-/** HTML comment marker used to identify and upsert Odin Scan PR comments. */
-const COMMENT_MARKER = '<!-- odin-scan-report -->';
 /** Emoji for each severity level, matching the markdown report convention. */
 const SEVERITY_EMOJI = {
     critical: '🔴',
@@ -82286,14 +82284,13 @@ function truncate(text, maxLen) {
  * Formats the PR comment body from analysis results.
  *
  * Produces a markdown table of finding counts by severity,
- * lists the top 5 most severe findings with description and location,
+ * lists Critical and High findings with description and location,
  * and links to the full report.
  */
 function formatComment(result, reportUrl) {
     const { summary } = result;
     const totalReal = summary.totalFindings - (summary.falsePositiveCount || 0);
-    let body = `${COMMENT_MARKER}\n`;
-    body += `## 🛡️ Odin Scan Security Analysis\n\n`;
+    let body = `## 🛡️ Odin Scan Security Analysis\n\n`;
     if (totalReal === 0) {
         body += `✅ **No security findings detected.**\n\n`;
     }
@@ -82311,18 +82308,10 @@ function formatComment(result, reportUrl) {
         if (summary.informationalFindings > 0)
             body += `| 🔵 Info | ${summary.informationalFindings} |\n`;
         body += `\n`;
-        // Show top 5 findings sorted by severity (highest first)
-        const severityOrder = {
-            critical: 5,
-            high: 4,
-            medium: 3,
-            low: 2,
-            informational: 1,
-        };
+        // Show only Critical and High findings (most actionable for PR review)
         const topFindings = result.findings
-            .filter(f => !f.isLikelyFalsePositive)
-            .sort((a, b) => (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0))
-            .slice(0, 5);
+            .filter(f => !f.isLikelyFalsePositive && (f.severity === 'critical' || f.severity === 'high'))
+            .sort((a, b) => (a.severity === 'critical' ? -1 : 1));
         if (topFindings.length > 0) {
             body += `### Top Findings\n\n`;
             for (const f of topFindings) {
@@ -82356,13 +82345,13 @@ function formatComment(result, reportUrl) {
     return body;
 }
 /**
- * Creates or updates the PR comment with analysis results.
+ * Creates a new PR comment with analysis results.
  *
- * Uses a hidden HTML comment marker to find and update an existing
- * comment, avoiding duplicate comments on re-runs. No-ops if the
+ * Posts a fresh comment on each run so every commit gets its own
+ * security summary visible in the PR timeline. No-ops if the
  * current context is not a pull request.
  */
-async function upsertPrComment(result, reportUrl, githubToken) {
+async function postPrComment(result, reportUrl, githubToken) {
     const context = github.context;
     if (!context.payload.pull_request) {
         core.info('Not a pull request -- skipping PR comment');
@@ -82373,32 +82362,13 @@ async function upsertPrComment(result, reportUrl, githubToken) {
     const owner = context.repo.owner;
     const repo = context.repo.repo;
     const body = formatComment(result, reportUrl);
-    // Search for an existing Odin Scan comment to update
-    const { data: comments } = await octokit.rest.issues.listComments({
+    core.info('Creating new PR comment');
+    await octokit.rest.issues.createComment({
         owner,
         repo,
         issue_number: issueNumber,
-        per_page: 100,
+        body,
     });
-    const existing = comments.find(c => c.body?.includes(COMMENT_MARKER));
-    if (existing) {
-        core.info(`Updating existing PR comment #${existing.id}`);
-        await octokit.rest.issues.updateComment({
-            owner,
-            repo,
-            comment_id: existing.id,
-            body,
-        });
-    }
-    else {
-        core.info('Creating new PR comment');
-        await octokit.rest.issues.createComment({
-            owner,
-            repo,
-            issue_number: issueNumber,
-            body,
-        });
-    }
 }
 
 

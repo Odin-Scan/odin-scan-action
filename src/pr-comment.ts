@@ -2,9 +2,6 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import type { AnalysisResult, Severity } from './types';
 
-/** HTML comment marker used to identify and upsert Odin Scan PR comments. */
-const COMMENT_MARKER = '<!-- odin-scan-report -->';
-
 /** Emoji for each severity level, matching the markdown report convention. */
 const SEVERITY_EMOJI: Record<Severity, string> = {
   critical: '🔴',
@@ -32,15 +29,14 @@ function truncate(text: string, maxLen: number): string {
  * Formats the PR comment body from analysis results.
  *
  * Produces a markdown table of finding counts by severity,
- * lists the top 5 most severe findings with description and location,
+ * lists Critical and High findings with description and location,
  * and links to the full report.
  */
 function formatComment(result: AnalysisResult, reportUrl: string): string {
   const { summary } = result;
   const totalReal = summary.totalFindings - (summary.falsePositiveCount || 0);
 
-  let body = `${COMMENT_MARKER}\n`;
-  body += `## 🛡️ Odin Scan Security Analysis\n\n`;
+  let body = `## 🛡️ Odin Scan Security Analysis\n\n`;
 
   if (totalReal === 0) {
     body += `✅ **No security findings detected.**\n\n`;
@@ -54,19 +50,10 @@ function formatComment(result: AnalysisResult, reportUrl: string): string {
     if (summary.informationalFindings > 0) body += `| 🔵 Info | ${summary.informationalFindings} |\n`;
     body += `\n`;
 
-    // Show top 5 findings sorted by severity (highest first)
-    const severityOrder: Record<string, number> = {
-      critical: 5,
-      high: 4,
-      medium: 3,
-      low: 2,
-      informational: 1,
-    };
-
+    // Show only Critical and High findings (most actionable for PR review)
     const topFindings = result.findings
-      .filter(f => !f.isLikelyFalsePositive)
-      .sort((a, b) => (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0))
-      .slice(0, 5);
+      .filter(f => !f.isLikelyFalsePositive && (f.severity === 'critical' || f.severity === 'high'))
+      .sort((a, b) => (a.severity === 'critical' ? -1 : 1));
 
     if (topFindings.length > 0) {
       body += `### Top Findings\n\n`;
@@ -103,13 +90,13 @@ function formatComment(result: AnalysisResult, reportUrl: string): string {
 }
 
 /**
- * Creates or updates the PR comment with analysis results.
+ * Creates a new PR comment with analysis results.
  *
- * Uses a hidden HTML comment marker to find and update an existing
- * comment, avoiding duplicate comments on re-runs. No-ops if the
+ * Posts a fresh comment on each run so every commit gets its own
+ * security summary visible in the PR timeline. No-ops if the
  * current context is not a pull request.
  */
-export async function upsertPrComment(
+export async function postPrComment(
   result: AnalysisResult,
   reportUrl: string,
   githubToken: string,
@@ -127,31 +114,11 @@ export async function upsertPrComment(
   const repo = context.repo.repo;
   const body = formatComment(result, reportUrl);
 
-  // Search for an existing Odin Scan comment to update
-  const { data: comments } = await octokit.rest.issues.listComments({
+  core.info('Creating new PR comment');
+  await octokit.rest.issues.createComment({
     owner,
     repo,
     issue_number: issueNumber,
-    per_page: 100,
+    body,
   });
-
-  const existing = comments.find(c => c.body?.includes(COMMENT_MARKER));
-
-  if (existing) {
-    core.info(`Updating existing PR comment #${existing.id}`);
-    await octokit.rest.issues.updateComment({
-      owner,
-      repo,
-      comment_id: existing.id,
-      body,
-    });
-  } else {
-    core.info('Creating new PR comment');
-    await octokit.rest.issues.createComment({
-      owner,
-      repo,
-      issue_number: issueNumber,
-      body,
-    });
-  }
 }

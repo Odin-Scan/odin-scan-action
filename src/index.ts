@@ -7,7 +7,7 @@ import { DefaultArtifactClient } from '@actions/artifact';
 import { OdinScanClient } from './api-client';
 import { generateSarif } from './sarif';
 import { emitAnnotations } from './annotations';
-import { upsertPrComment } from './pr-comment';
+import { postPrComment } from './pr-comment';
 import { exceedsThreshold, countFindingsAboveThreshold } from './severity';
 import type { ActionConfig, Platform, ThresholdLevel } from './types';
 
@@ -195,7 +195,7 @@ async function run(): Promise<void> {
     // 11. PR comment
     if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
       try {
-        await upsertPrComment(result, reportUrl, effectiveGithubToken);
+        await postPrComment(result, reportUrl, effectiveGithubToken);
         core.info('PR comment posted');
       } catch (err) {
         core.warning(
