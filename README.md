@@ -176,15 +176,29 @@ permissions:
 
 ## Public Repository Security
 
-On public repositories, PR comments and inline annotations are visible to anyone. This can create an attack window where a threat actor reads vulnerability details before your team fixes them.
+On public repositories, PR comments and inline annotations are visible to anyone. When the action reports a vulnerability with its title, file location, and description, a threat actor monitoring the repository can read those details and exploit the issue before your team fixes it.
 
-Use the `findings-visibility` input to control disclosure:
+The `findings-visibility` input controls how much detail is exposed in these two public channels (PR comments and inline annotations). It does **not** affect SARIF uploads or workflow artifacts, which are already permission-gated by GitHub.
 
-| Mode | PR Comment | Annotations | Best for |
-|------|-----------|-------------|----------|
-| `full` | Severity table + finding details | Emitted | Private repos |
-| `counts` | Severity table only | Suppressed | Public repos (aggregate signal) |
-| `private` | "Findings detected" + link | Suppressed | Public repos with production code |
+### Why three modes instead of a simple on/off toggle
+
+A binary "redact findings" flag would force a choice between showing everything or showing nothing. In practice there are three distinct threat profiles, each needing a different level of disclosure:
+
+| Mode | PR Comment | Annotations | Threat model |
+|------|-----------|-------------|--------------|
+| `full` | Severity table + finding details (titles, locations, descriptions) | Emitted | **Private repos** where all viewers are trusted. No information asymmetry to exploit. |
+| `counts` | Severity table only -- no titles, file paths, or descriptions | Suppressed | **Public repos** where the team wants an aggregate "how bad is this PR" signal without broadcasting *which* vulnerability or *where* it lives. An attacker learns "2 critical findings" but not what they are. |
+| `private` | "Findings detected -- see private report" + link only | Suppressed | **Public repos with production code** where even revealing counts could signal that a PR touches something security-sensitive and motivate targeted review of the diff. |
+
+### Annotation suppression
+
+Inline annotations (`core.error` / `core.warning`) render directly on the PR diff with the full vulnerability title, file path, and description. On a public repo they are just as visible as the PR comment itself. When `findings-visibility` is set to `counts` or `private`, annotations are suppressed entirely so that the disclosure control is airtight across both channels.
+
+### Zero-findings behavior
+
+In `full` and `counts` modes the comment shows "No security findings detected." In `private` mode it shows the neutral "Security analysis complete." to avoid leaking even the absence of findings as a signal.
+
+### Example
 
 ```yaml
 - uses: odin-scan/odin-scan-action@v1
@@ -193,7 +207,10 @@ Use the `findings-visibility` input to control disclosure:
     findings-visibility: private
 ```
 
-SARIF uploads and workflow artifacts are unaffected by this setting -- GitHub restricts SARIF results to users with security permissions, and artifacts require repository access.
+### Unaffected channels
+
+- **SARIF / Code Scanning** -- results are only visible to users with security permissions, even on public repos.
+- **Workflow artifacts** -- require repository write access to download.
 
 ## Troubleshooting
 
