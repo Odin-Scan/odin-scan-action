@@ -124,6 +124,16 @@ export interface AnalysisResult {
   executionTime?: number;
 }
 
+/** Response from the installation token endpoint. */
+export interface InstallationTokenResponse {
+  /** Whether the GitHub App is installed on the repository. */
+  installed: boolean;
+  /** Short-lived installation token (null if not installed). */
+  token: string | null;
+  /** ISO 8601 expiration timestamp (null if not installed). */
+  expires_at: string | null;
+}
+
 /** Action configuration parsed from inputs. */
 export interface ActionConfig {
   /** Odin Scan API key. */

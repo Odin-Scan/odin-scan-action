@@ -81964,6 +81964,10 @@ class OdinScanClient {
     async getAnalysisResult(analysisId) {
         return this.request(`/api/v1/analysis/${analysisId}/result`);
     }
+    /** Fetches a GitHub App installation token for the given repository. */
+    async getInstallationToken(repo) {
+        return this.request(`/api/v1/github-app/installation-token?repo=${encodeURIComponent(repo)}`);
+    }
 }
 exports.OdinScanClient = OdinScanClient;
 
@@ -82129,16 +82133,32 @@ async function run() {
         //      https://api.odinscan.ai          → https://odinscan.ai/dashboard/reports/<id>
         const reportUrl = `${config.apiUrl.replace('://api.', '://')}/dashboard/reports/${analysisId}`;
         core.setOutput('report-url', reportUrl);
-        // 7. Generate SARIF
+        // 7. Try to get a branded GitHub App token for PR comments/SARIF
+        let effectiveGithubToken = config.githubToken;
+        try {
+            const repoName = `${context.repo.owner}/${context.repo.repo}`;
+            const appToken = await client.getInstallationToken(repoName);
+            if (appToken.installed && appToken.token) {
+                effectiveGithubToken = appToken.token;
+                core.info('Using Odin Scan GitHub App token for PR comments');
+            }
+            else {
+                core.info('GitHub App not installed — using default github-token');
+            }
+        }
+        catch {
+            core.debug('GitHub App token unavailable, using default github-token');
+        }
+        // 8. Generate SARIF
         const sarif = (0, sarif_1.generateSarif)(result);
         const sarifPath = path.join(process.env.RUNNER_TEMP || '/tmp', 'odin-scan-results.sarif');
         fs.writeFileSync(sarifPath, JSON.stringify(sarif, null, 2));
         core.setOutput('sarif-file', sarifPath);
-        // 8. Upload SARIF to GitHub Code Scanning
-        if (config.uploadSarif && config.githubToken) {
+        // 9. Upload SARIF to GitHub Code Scanning
+        if (config.uploadSarif && effectiveGithubToken) {
             try {
                 core.info('Uploading SARIF to GitHub Code Scanning...');
-                const octokit = github.getOctokit(config.githubToken);
+                const octokit = github.getOctokit(effectiveGithubToken);
                 const sarifContent = fs.readFileSync(sarifPath, 'utf8');
                 const gzipped = zlib.gzipSync(Buffer.from(sarifContent)).toString('base64');
                 await octokit.rest.codeScanning.uploadSarif({
@@ -82156,19 +82176,19 @@ async function run() {
                 core.warning(`Failed to upload SARIF: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
-        // 9. Emit annotations
+        // 10. Emit annotations
         (0, annotations_1.emitAnnotations)(result.findings);
-        // 10. PR comment
-        if (config.commentOnPr && context.payload.pull_request && config.githubToken) {
+        // 11. PR comment
+        if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
             try {
-                await (0, pr_comment_1.upsertPrComment)(result, reportUrl, config.githubToken);
+                await (0, pr_comment_1.upsertPrComment)(result, reportUrl, effectiveGithubToken);
                 core.info('PR comment posted');
             }
             catch (err) {
                 core.warning(`Failed to post PR comment: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
-        // 11. Upload artifact
+        // 12. Upload artifact
         if (config.uploadArtifact) {
             try {
                 core.info('Uploading report artifact...');
@@ -82182,7 +82202,7 @@ async function run() {
                 core.warning(`Failed to upload artifact: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
-        // 12. Check threshold
+        // 13. Check threshold
         if (config.failOnFindings && (0, severity_1.exceedsThreshold)(result, config.severityThreshold)) {
             const count = (0, severity_1.countFindingsAboveThreshold)(result, config.severityThreshold);
             core.setFailed(`${count} finding(s) at or above '${config.severityThreshold}' severity threshold`);

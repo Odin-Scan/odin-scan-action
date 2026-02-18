@@ -4,6 +4,7 @@ import type {
   CreateAnalysisResponse,
   AnalysisStatusResponse,
   AnalysisResult,
+  InstallationTokenResponse,
 } from './types';
 
 /**
@@ -79,5 +80,12 @@ export class OdinScanClient {
   /** Retrieves the full analysis results including findings. */
   async getAnalysisResult(analysisId: string): Promise<AnalysisResult> {
     return this.request<AnalysisResult>(`/api/v1/analysis/${analysisId}/result`);
+  }
+
+  /** Fetches a GitHub App installation token for the given repository. */
+  async getInstallationToken(repo: string): Promise<InstallationTokenResponse> {
+    return this.request<InstallationTokenResponse>(
+      `/api/v1/github-app/installation-token?repo=${encodeURIComponent(repo)}`,
+    );
   }
 }
