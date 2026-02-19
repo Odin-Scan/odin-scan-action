@@ -161,4 +161,6 @@ export interface ActionConfig {
   timeout: number;
   /** GitHub token for API interactions. */
   githubToken: string;
+  /** Phrase in PR comments that triggers an on-demand scan. */
+  triggerPhrase: string;
 }

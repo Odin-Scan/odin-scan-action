@@ -50,6 +50,10 @@ inputs:
     description: 'Odin Scan API base URL'
     required: false
     default: 'https://api.odinscan.ai'
+  trigger-phrase:
+    description: 'Phrase in PR comments that triggers an on-demand scan (e.g., "@odin-scan", "/scan")'
+    required: false
+    default: '@odin-scan'
 
 outputs:
   analysis-id:

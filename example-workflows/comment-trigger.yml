@@ -1,0 +1,26 @@
+name: Odin Scan (Comment Trigger)
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  security-scan:
+    # Only run for PR comments containing the trigger phrase
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@odin-scan')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      # Checkout the PR branch (issue_comment defaults to the base branch)
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+
+      - uses: odin-scan/odin-scan-action@v1
+        with:
+          api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+          trigger-phrase: '@odin-scan'

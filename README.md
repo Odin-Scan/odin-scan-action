@@ -9,6 +9,7 @@ AI-powered smart contract security analysis for CosmWasm, Solana, and EVM projec
 - **GitHub Code Scanning integration** -- uploads SARIF for native security alerts
 - **PR comments** -- summary of findings posted directly on pull requests
 - **Inline annotations** -- findings appear as errors/warnings on changed files
+- **Comment-triggered scans** -- trigger on-demand scans by commenting on PRs
 - **Configurable thresholds** -- fail builds based on severity level
 - **Artifact upload** -- full JSON report available as workflow artifact
 
@@ -56,6 +57,7 @@ jobs:
 | `timeout` | No | `1800` | Max wait for analysis completion (seconds) |
 | `github-token` | No | `${{ github.token }}` | GitHub token for PR comments and SARIF upload |
 | `api-url` | No | `https://api.odinscan.ai` | Odin Scan API base URL |
+| `trigger-phrase` | No | `@odin-scan` | Phrase in PR comments that triggers an on-demand scan |
 
 ## Outputs
 
@@ -146,6 +148,80 @@ on:
       - 'hardhat.config.*'
 ```
 
+## Comment-Triggered Scans
+
+Trigger a security scan on-demand by commenting on a pull request. This is useful for re-scanning after fixes, scanning external contributor PRs on demand, or running targeted scans without automatic triggers.
+
+### How It Works
+
+1. A collaborator comments `@odin-scan` (or your custom trigger phrase) on a PR
+2. The action adds a rocket reaction to the comment as acknowledgment
+3. The scan runs against the PR's head branch and commit
+4. Results are posted as a PR comment (and optionally uploaded as SARIF/artifact)
+
+### Workflow Setup
+
+Your workflow must listen to the `issue_comment` event. Use a job-level `if:` guard to avoid spinning up runners for every comment:
+
+```yaml
+name: Odin Scan (Comment Trigger)
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  security-scan:
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@odin-scan')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+      - uses: odin-scan/odin-scan-action@v1
+        with:
+          api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+          trigger-phrase: '@odin-scan'
+```
+
+### Combined Workflow (Auto + Comment Trigger)
+
+You can combine automatic PR scans and comment-triggered scans in a single workflow file using separate jobs:
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+  issue_comment:
+    types: [created]
+
+jobs:
+  auto-scan:
+    if: github.event_name == 'pull_request'
+    # ... standard scan setup ...
+
+  comment-scan:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@odin-scan')
+    # ... comment-triggered scan setup ...
+```
+
+See `example-workflows/combined.yml` for the full example.
+
+### Important Notes
+
+- **Checkout ref**: The `issue_comment` event checks out the default branch by default. You must use `ref: refs/pull/${{ github.event.issue.number }}/merge` in `actions/checkout` to get the PR code.
+- **Job-level `if:` guard**: Without it, every comment on every issue and PR will spin up a runner. The action will exit silently for non-matching comments, but you still pay for the runner startup time.
+- **Custom trigger phrase**: Set `trigger-phrase` to any string (e.g., `/scan`, `@security-check`). Both `@` and `/` prefixes are recognized interchangeably.
+- **Bot loop prevention**: Comments from bots (`sender.type === 'Bot'`) are automatically ignored.
+
 ## GitHub Code Scanning (SARIF)
 
 When `upload-sarif` is enabled (default), findings are uploaded to GitHub Code Scanning. This provides:
@@ -228,7 +304,7 @@ Ensure the workflow has `security-events: write` permission. On private reposito
 
 ### "Failed to post PR comment"
 
-Ensure the workflow has `pull-requests: write` permission and is triggered by a `pull_request` event.
+Ensure the workflow has `pull-requests: write` permission and is triggered by a `pull_request` or `issue_comment` event.
 
 ### Analysis fails immediately
 

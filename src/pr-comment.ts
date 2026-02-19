@@ -173,25 +173,30 @@ function formatComment(result: AnalysisResult, reportUrl: string, mode: Findings
  * Creates a new PR comment with analysis results.
  *
  * Posts a fresh comment on each run so every commit gets its own
- * security summary visible in the PR timeline. No-ops if the
- * current context is not a pull request. The visibility mode controls
- * how much finding detail is included in the comment.
+ * security summary visible in the PR timeline. No-ops if no PR number
+ * can be resolved. The visibility mode controls how much finding detail
+ * is included in the comment.
+ *
+ * When called from a comment-triggered scan, `prNumber` supplies the
+ * PR number directly since `context.payload.pull_request` is absent
+ * in `issue_comment` events.
  */
 export async function postPrComment(
   result: AnalysisResult,
   reportUrl: string,
   githubToken: string,
   mode: FindingsVisibility = 'full',
+  prNumber?: number,
 ): Promise<void> {
   const context = github.context;
+  const issueNumber = prNumber || context.payload.pull_request?.number;
 
-  if (!context.payload.pull_request) {
-    core.info('Not a pull request -- skipping PR comment');
+  if (!issueNumber) {
+    core.info('No PR number available -- skipping PR comment');
     return;
   }
 
   const octokit = github.getOctokit(githubToken);
-  const issueNumber = context.payload.pull_request.number;
   const owner = context.repo.owner;
   const repo = context.repo.repo;
   const body = formatComment(result, reportUrl, mode);

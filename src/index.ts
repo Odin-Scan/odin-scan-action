@@ -8,6 +8,7 @@ import { OdinScanClient } from './api-client';
 import { generateSarif } from './sarif';
 import { emitAnnotations } from './annotations';
 import { postPrComment } from './pr-comment';
+import { isCommentTrigger, fetchPullRequestInfo, acknowledgeComment } from './comment-trigger';
 import { exceedsThreshold, countFindingsAboveThreshold } from './severity';
 import type { ActionConfig, FindingsVisibility, Platform, ThresholdLevel } from './types';
 
@@ -28,6 +29,7 @@ function parseInputs(): ActionConfig {
     uploadArtifact: core.getBooleanInput('upload-artifact'),
     timeout: parseInt(core.getInput('timeout') || '1800', 10),
     githubToken: core.getInput('github-token') || process.env.GITHUB_TOKEN || '',
+    triggerPhrase: core.getInput('trigger-phrase') || '@odin-scan',
   };
 }
 
@@ -98,8 +100,16 @@ async function pollUntilComplete(
 async function run(): Promise<void> {
   try {
     const config = parseInputs();
-    const client = new OdinScanClient(config.apiUrl, config.apiKey);
     const context = github.context;
+
+    // 0. Early exit for non-matching comment triggers
+    const commentTriggered = isCommentTrigger(config.triggerPhrase);
+    if (context.eventName === 'issue_comment' && !commentTriggered) {
+      core.info('Comment does not match trigger phrase -- skipping');
+      return;
+    }
+
+    const client = new OdinScanClient(config.apiUrl, config.apiKey);
 
     // 1. Validate API key
     core.info('Validating API key...');
@@ -112,10 +122,27 @@ async function run(): Promise<void> {
     // 2. Determine repository info
     const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
     const repoName = `${context.repo.owner}/${context.repo.repo}`;
-    const branch =
-      context.payload.pull_request?.head?.ref ||
-      context.ref?.replace('refs/heads/', '') ||
-      undefined;
+
+    let branch: string | undefined;
+    let commitSha: string;
+    let prNumber: number | undefined;
+
+    if (commentTriggered) {
+      await acknowledgeComment(config.githubToken);
+      const prInfo = await fetchPullRequestInfo(config.githubToken);
+      branch = prInfo.headRef;
+      commitSha = prInfo.headSha;
+      prNumber = prInfo.number;
+      core.info(`Comment-triggered scan for PR #${prNumber} (branch: ${branch})`);
+    } else {
+      branch =
+        context.payload.pull_request?.head?.ref ||
+        context.ref?.replace('refs/heads/', '') ||
+        undefined;
+      commitSha = context.payload.pull_request?.head?.sha || context.sha;
+      prNumber = context.payload.pull_request?.number;
+    }
+
     const framework = resolveFramework(config.platform);
 
     // 3. Create analysis
@@ -195,10 +222,8 @@ async function run(): Promise<void> {
         await octokit.rest.codeScanning.uploadSarif({
           owner: context.repo.owner,
           repo: context.repo.repo,
-          commit_sha: context.payload.pull_request?.head?.sha || context.sha,
-          ref: context.payload.pull_request?.head?.ref
-            ? `refs/heads/${context.payload.pull_request.head.ref}`
-            : context.ref,
+          commit_sha: commitSha,
+          ref: branch ? `refs/heads/${branch}` : context.ref,
           sarif: gzipped,
         });
         core.info('SARIF uploaded successfully');
@@ -213,9 +238,9 @@ async function run(): Promise<void> {
     }
 
     // 11. PR comment
-    if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
+    if (config.commentOnPr && (context.payload.pull_request || commentTriggered) && effectiveGithubToken) {
       try {
-        await postPrComment(result, reportUrl, effectiveGithubToken, config.findingsVisibility);
+        await postPrComment(result, reportUrl, effectiveGithubToken, config.findingsVisibility, prNumber);
         core.info('PR comment posted');
       } catch (err) {
         core.warning(

@@ -1,0 +1,41 @@
+name: Odin Scan Security Analysis
+on:
+  pull_request:
+    branches: [main, master]
+  issue_comment:
+    types: [created]
+
+jobs:
+  # Auto-scan on every pull request
+  auto-scan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: odin-scan/odin-scan-action@v1
+        with:
+          api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+
+  # On-demand scan triggered by commenting "@odin-scan" on a PR
+  comment-scan:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@odin-scan')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+      - uses: odin-scan/odin-scan-action@v1
+        with:
+          api-key: ${{ secrets.ODIN_SCAN_API_KEY }}
+          trigger-phrase: '@odin-scan'

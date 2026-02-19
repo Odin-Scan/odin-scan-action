@@ -81974,6 +81974,128 @@ exports.OdinScanClient = OdinScanClient;
 
 /***/ }),
 
+/***/ 1575:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isCommentTrigger = isCommentTrigger;
+exports.fetchPullRequestInfo = fetchPullRequestInfo;
+exports.acknowledgeComment = acknowledgeComment;
+const core = __importStar(__nccwpck_require__(37484));
+const github = __importStar(__nccwpck_require__(93228));
+/**
+ * Determines whether the current workflow run is a comment-triggered scan.
+ *
+ * Returns `true` only when all conditions are met:
+ * 1. Event is `issue_comment` with action `created`
+ * 2. Comment is on a pull request (not a plain issue)
+ * 3. Sender is not a bot (prevents infinite loops)
+ * 4. Comment body contains the trigger phrase (case-insensitive)
+ *
+ * Also matches `/odin-scan` when trigger phrase is `@odin-scan` (and vice-versa).
+ */
+function isCommentTrigger(triggerPhrase) {
+    const context = github.context;
+    if (context.eventName !== 'issue_comment')
+        return false;
+    if (context.payload.action !== 'created')
+        return false;
+    if (!context.payload.issue?.pull_request)
+        return false;
+    if (context.payload.sender?.type === 'Bot')
+        return false;
+    const body = (context.payload.comment?.body ?? '').toLowerCase();
+    const phrase = triggerPhrase.toLowerCase();
+    if (body.includes(phrase))
+        return true;
+    // Allow `/odin-scan` as alias for `@odin-scan` and vice-versa
+    const altPhrase = phrase.startsWith('@')
+        ? '/' + phrase.slice(1)
+        : phrase.startsWith('/')
+            ? '@' + phrase.slice(1)
+            : null;
+    return altPhrase !== null && body.includes(altPhrase);
+}
+/**
+ * Fetches the PR head ref and SHA from the GitHub API.
+ *
+ * Required because `issue_comment` events set `context.sha` and `context.ref`
+ * to the default branch, not the PR branch.
+ */
+async function fetchPullRequestInfo(githubToken) {
+    const context = github.context;
+    const octokit = github.getOctokit(githubToken);
+    const { data: pr } = await octokit.rest.pulls.get({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        pull_number: context.payload.issue.number,
+    });
+    return {
+        number: pr.number,
+        headRef: pr.head.ref,
+        headSha: pr.head.sha,
+    };
+}
+/**
+ * Adds a rocket reaction to the trigger comment as visual acknowledgment.
+ *
+ * Catches and warns on failure so the scan continues even if the reaction
+ * permission is denied.
+ */
+async function acknowledgeComment(githubToken) {
+    const context = github.context;
+    try {
+        const octokit = github.getOctokit(githubToken);
+        await octokit.rest.reactions.createForIssueComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            comment_id: context.payload.comment.id,
+            content: 'rocket',
+        });
+    }
+    catch (err) {
+        core.warning(`Failed to add reaction to comment: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+
+
+/***/ }),
+
 /***/ 79407:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -82023,6 +82145,7 @@ const api_client_1 = __nccwpck_require__(87475);
 const sarif_1 = __nccwpck_require__(20866);
 const annotations_1 = __nccwpck_require__(30105);
 const pr_comment_1 = __nccwpck_require__(5525);
+const comment_trigger_1 = __nccwpck_require__(1575);
 const severity_1 = __nccwpck_require__(21012);
 /** Parses and validates action inputs from the workflow configuration. */
 function parseInputs() {
@@ -82040,6 +82163,7 @@ function parseInputs() {
         uploadArtifact: core.getBooleanInput('upload-artifact'),
         timeout: parseInt(core.getInput('timeout') || '1800', 10),
         githubToken: core.getInput('github-token') || process.env.GITHUB_TOKEN || '',
+        triggerPhrase: core.getInput('trigger-phrase') || '@odin-scan',
     };
 }
 /** Valid values for the findings-visibility input. */
@@ -82099,8 +82223,14 @@ async function pollUntilComplete(client, analysisId, timeoutMs) {
 async function run() {
     try {
         const config = parseInputs();
-        const client = new api_client_1.OdinScanClient(config.apiUrl, config.apiKey);
         const context = github.context;
+        // 0. Early exit for non-matching comment triggers
+        const commentTriggered = (0, comment_trigger_1.isCommentTrigger)(config.triggerPhrase);
+        if (context.eventName === 'issue_comment' && !commentTriggered) {
+            core.info('Comment does not match trigger phrase -- skipping');
+            return;
+        }
+        const client = new api_client_1.OdinScanClient(config.apiUrl, config.apiKey);
         // 1. Validate API key
         core.info('Validating API key...');
         const keyInfo = await client.verifyKey();
@@ -82111,9 +82241,25 @@ async function run() {
         // 2. Determine repository info
         const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
         const repoName = `${context.repo.owner}/${context.repo.repo}`;
-        const branch = context.payload.pull_request?.head?.ref ||
-            context.ref?.replace('refs/heads/', '') ||
-            undefined;
+        let branch;
+        let commitSha;
+        let prNumber;
+        if (commentTriggered) {
+            await (0, comment_trigger_1.acknowledgeComment)(config.githubToken);
+            const prInfo = await (0, comment_trigger_1.fetchPullRequestInfo)(config.githubToken);
+            branch = prInfo.headRef;
+            commitSha = prInfo.headSha;
+            prNumber = prInfo.number;
+            core.info(`Comment-triggered scan for PR #${prNumber} (branch: ${branch})`);
+        }
+        else {
+            branch =
+                context.payload.pull_request?.head?.ref ||
+                    context.ref?.replace('refs/heads/', '') ||
+                    undefined;
+            commitSha = context.payload.pull_request?.head?.sha || context.sha;
+            prNumber = context.payload.pull_request?.number;
+        }
         const framework = resolveFramework(config.platform);
         // 3. Create analysis
         core.info(`Creating analysis for ${repoName} (platform: ${framework}, branch: ${branch || 'default'})...`);
@@ -82180,10 +82326,8 @@ async function run() {
                 await octokit.rest.codeScanning.uploadSarif({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    commit_sha: context.payload.pull_request?.head?.sha || context.sha,
-                    ref: context.payload.pull_request?.head?.ref
-                        ? `refs/heads/${context.payload.pull_request.head.ref}`
-                        : context.ref,
+                    commit_sha: commitSha,
+                    ref: branch ? `refs/heads/${branch}` : context.ref,
                     sarif: gzipped,
                 });
                 core.info('SARIF uploaded successfully');
@@ -82197,9 +82341,9 @@ async function run() {
             (0, annotations_1.emitAnnotations)(result.findings);
         }
         // 11. PR comment
-        if (config.commentOnPr && context.payload.pull_request && effectiveGithubToken) {
+        if (config.commentOnPr && (context.payload.pull_request || commentTriggered) && effectiveGithubToken) {
             try {
-                await (0, pr_comment_1.postPrComment)(result, reportUrl, effectiveGithubToken, config.findingsVisibility);
+                await (0, pr_comment_1.postPrComment)(result, reportUrl, effectiveGithubToken, config.findingsVisibility, prNumber);
                 core.info('PR comment posted');
             }
             catch (err) {
@@ -82440,18 +82584,22 @@ function formatComment(result, reportUrl, mode) {
  * Creates a new PR comment with analysis results.
  *
  * Posts a fresh comment on each run so every commit gets its own
- * security summary visible in the PR timeline. No-ops if the
- * current context is not a pull request. The visibility mode controls
- * how much finding detail is included in the comment.
+ * security summary visible in the PR timeline. No-ops if no PR number
+ * can be resolved. The visibility mode controls how much finding detail
+ * is included in the comment.
+ *
+ * When called from a comment-triggered scan, `prNumber` supplies the
+ * PR number directly since `context.payload.pull_request` is absent
+ * in `issue_comment` events.
  */
-async function postPrComment(result, reportUrl, githubToken, mode = 'full') {
+async function postPrComment(result, reportUrl, githubToken, mode = 'full', prNumber) {
     const context = github.context;
-    if (!context.payload.pull_request) {
-        core.info('Not a pull request -- skipping PR comment');
+    const issueNumber = prNumber || context.payload.pull_request?.number;
+    if (!issueNumber) {
+        core.info('No PR number available -- skipping PR comment');
         return;
     }
     const octokit = github.getOctokit(githubToken);
-    const issueNumber = context.payload.pull_request.number;
     const owner = context.repo.owner;
     const repo = context.repo.repo;
     const body = formatComment(result, reportUrl, mode);
