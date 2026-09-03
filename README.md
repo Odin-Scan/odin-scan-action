@@ -1,6 +1,14 @@
 # Odin Scan GitHub Action
 
+[![Marketplace](https://img.shields.io/badge/GitHub-Marketplace-blue?logo=githubactions&logoColor=white)](https://github.com/marketplace/actions/odin-scan)
+
 AI-powered smart contract security analysis for CosmWasm, Solana, and EVM projects. Integrates directly into your GitHub workflow to catch vulnerabilities before they reach production.
+
+## Demo
+
+![Odin Scan in action](demo.gif)
+
+*Odin Scan posts a findings summary as a PR comment and uploads SARIF to Code Scanning. Pull request data shown for demonstration purposes.*
 
 ## Features
 
@@ -12,6 +20,12 @@ AI-powered smart contract security analysis for CosmWasm, Solana, and EVM projec
 - **Comment-triggered scans** -- trigger on-demand scans by commenting on PRs
 - **Configurable thresholds** -- fail builds based on severity level
 - **Artifact upload** -- full JSON report available as workflow artifact
+
+## Requirements
+
+- An [Odin Scan](https://odinscan.ai) account with an API key (`odin_sk_*`)
+- A GitHub repository (public or private, once scanned via the GH App)
+- Standard GitHub Actions runner (`ubuntu-latest` / `node20`)
 
 ## Quick Start
 
